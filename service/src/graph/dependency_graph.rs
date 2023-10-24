@@ -265,12 +265,15 @@ impl DependencyGraph {
         services: Vec<String>,
     ) -> Result<()> {
         services.iter().try_for_each(|service| -> Result<()> {
+            // Search the service to remove in self.nodes
             let node_index = self
                 .nodes
                 .get_index_of(service)
                 .context(ServiceNotEnabledSnafu { service })?;
             self.enabled_services.remove(&node_index);
+            // If no other service is depending on this one
             if !self.is_node_required(node_index) {
+                // Remove it completely. Otherwise, leave it as dependency
                 self.remove_node(node_index);
             }
 
@@ -284,10 +287,13 @@ impl DependencyGraph {
     ) {
         let name = self.nodes[index].name().to_owned();
         // This node has already been removed from the graph
+        // This shouldn't happen but better be safe
         if !self.has_service(&name) {
             return;
         }
 
+        // Recursively remove all the dependencies of this node, if no other service
+        // depends on them and they are not explicitly enabled
         self.nodes[index]
             .service
             .dependencies()
