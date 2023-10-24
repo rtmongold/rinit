@@ -219,6 +219,34 @@ impl DependencyGraph {
         &self,
         services_to_enable: Vec<usize>,
     ) -> Result<()> {
+        fn visit(
+            graph: &DependencyGraph,
+            colors: &mut HashMap<usize, Color>,
+            node: usize,
+        ) -> Result<()> {
+            colors.insert(node, Color::Gray);
+
+            graph
+                .nodes
+                .get_index(node)
+                .unwrap()
+                .1
+                .service
+                .dependencies()
+                .iter()
+                .map(|dep| graph.nodes.get_index_of(dep).unwrap())
+                .try_for_each(|dep| -> Result<()> {
+                    match colors.get(&dep).unwrap() {
+                        Color::White => visit(graph, colors, dep),
+                        Color::Gray => Err(DependencyGraphError::CycleFoundError {}),
+                        Color::Black => Ok(()),
+                    }
+                })?;
+
+            colors.insert(node, Color::Black);
+            Ok(())
+        }
+
         let mut colors: HashMap<usize, Color> = self
             .nodes
             .iter()
@@ -227,35 +255,8 @@ impl DependencyGraph {
 
         services_to_enable
             .iter()
-            .try_for_each(|node| -> Result<()> { self.visit(&mut colors, *node) })?;
+            .try_for_each(|node| -> Result<()> { visit(self, &mut colors, *node) })?;
 
-        Ok(())
-    }
-
-    fn visit(
-        &self,
-        colors: &mut HashMap<usize, Color>,
-        node: usize,
-    ) -> Result<()> {
-        colors.insert(node, Color::Gray);
-
-        self.nodes
-            .get_index(node)
-            .unwrap()
-            .1
-            .service
-            .dependencies()
-            .iter()
-            .map(|dep| self.nodes.get_index_of(dep).unwrap())
-            .try_for_each(|dep| -> Result<()> {
-                match colors.get(&dep).unwrap() {
-                    Color::White => self.visit(colors, dep),
-                    Color::Gray => Err(DependencyGraphError::CycleFoundError {}),
-                    Color::Black => Ok(()),
-                }
-            })?;
-
-        colors.insert(node, Color::Black);
         Ok(())
     }
 
