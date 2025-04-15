@@ -11,6 +11,7 @@ use async_recursion::async_recursion;
 use async_scoped_local::TokioScope;
 use indexmap::IndexMap;
 use rinit_ipc::{
+    Request,
     request_error::{
         DependencyFailedToStartSnafu,
         DependencyGraphNotFoundSnafu,
@@ -21,7 +22,6 @@ use rinit_ipc::{
         ServiceFailedToStartSnafu,
         ServiceNotFoundSnafu,
     },
-    Request,
 };
 use rinit_service::{
     config::Config,
@@ -34,9 +34,9 @@ use rinit_service::{
     types::RunLevel,
 };
 use snafu::{
-    ensure,
     ResultExt,
     Snafu,
+    ensure,
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -370,7 +370,7 @@ impl LiveServiceGraph {
         let dependents_running = tokio_stream::iter(dependents
             .iter())
             // Run this sequentially since we can't stop until each has been stopped
-            .then(async move |dependent| -> (&LiveService, IdleServiceState) {
+            .then(async move |dependent| -> (&&LiveService, IdleServiceState) {
                 (dependent, dependent.wait_idle_state().await)
             })
             .filter_map(|(dependent, state)|

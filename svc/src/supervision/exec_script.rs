@@ -13,6 +13,8 @@ use std::{
 use anyhow::{
     Context,
     Result,
+    anyhow,
+    bail,
 };
 use nix::{
     sys::signal::{
@@ -93,11 +95,11 @@ pub async fn exec_script(
         cmd.pre_exec(move || {
             let mask = SigSet::empty();
             if let Err(err) = mask.thread_swap_mask(SigmaskHow::SIG_SETMASK) {
-                warn!("failed to unblock signals: {:#?}", err);
+                warn!("failed to unblock signals: {err:#?}");
             }
             // create a new process group
             if let Err(err) = nix::unistd::setpgid(Pid::from_raw(0), Pid::from_raw(0)) {
-                warn!("failed to create new process group: {:#?}", err);
+                warn!("failed to create new process group: {err:#?}");
             }
             Ok(())
         })
@@ -108,16 +110,17 @@ pub async fn exec_script(
         let res = nix::unistd::pipe();
         match res {
             Ok((read, write)) => unsafe {
+                let cloned_pipe = (read.as_raw_fd(), write.as_raw_fd());
                 pipe = Some((read, write));
                 let notify: RawFd = (*notify).into();
                 cmd.pre_exec(move || {
-                    drop(read);
-                    dup2(write.as_raw_fd(), notify)?;
-                    drop(write);
+                    drop(cloned_pipe.0);
+                    dup2(cloned_pipe.1, notify)?;
+                    drop(cloned_pipe.1);
                     Ok(())
                 });
             },
-            Err(err) => error!("Could not setup a pipe for readiness: {err}"),
+            Err(err) => bail!("Could not setup a pipe for readiness: {err}"),
         }
     }
 
@@ -128,7 +131,7 @@ pub async fn exec_script(
     let child = cmd.spawn().context("unable to spawn script")?;
     Ok((
         child,
-        pipe.and_then(|(read, write)| {
+        pipe.and_then(|(read, write): (_, _)| {
             drop(write);
             match AsyncFd::with_interest(read, Interest::READABLE) {
                 Ok(notify) => Some(notify),
