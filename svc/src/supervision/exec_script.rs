@@ -4,6 +4,7 @@ use std::{
     os::fd::{
         AsRawFd,
         IntoRawFd,
+        BorrowedFd,
         OwnedFd,
         RawFd,
     },
@@ -27,6 +28,7 @@ use nix::{
         User,
         close,
         dup2,
+        dup2_raw,
     },
 };
 use rinit_service::types::{
@@ -117,6 +119,10 @@ pub async fn exec_script(
                     drop(cloned_pipe.0);
                     dup2(cloned_pipe.1, notify)?;
                     drop(cloned_pipe.1);
+                    // Ignore the errors
+                    let _ = close(cloned_pipe.0);
+                    dup2_raw(BorrowedFd::borrow_raw(cloned_pipe.1), notify)?;
+                    let _ = close(cloned_pipe.1);
                     Ok(())
                 });
             },

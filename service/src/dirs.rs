@@ -47,20 +47,19 @@ impl Dirs {
     /// Get the default directories for the user mode
     /// These are generated at runtime using xdg directory standard
     pub fn new_user_dirs() -> Result<Self, DirsError> {
-        let xdg: BaseDirectories =
-            BaseDirectories::with_prefix("rinit").context(BaseDirectoriesSnafu {})?;
+        let xdg: BaseDirectories = BaseDirectories::with_prefix("rinit");
         let system_config = Dirs::new_system_dirs();
         Ok(Dirs {
             path: env::var("PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| system_config.path),
-            configdir: xdg.get_config_home(),
+            configdir: xdg.get_config_home().expect("HOME must be set"),
             rundir: xdg
                 .get_runtime_directory()
                 .context(BaseDirectoriesSnafu {})?
                 .join("rinit"),
-            datadir: xdg.get_data_home(),
-            logdir: xdg.get_state_home(),
+            datadir: xdg.get_data_home().expect("HOME must be set"),
+            logdir: xdg.get_state_home().expect("HOME must be set"),
         })
     }
 
