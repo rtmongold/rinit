@@ -10,7 +10,6 @@ rinit-ipc = { path = "../ipc" }
 async-recursion = "1.1.1"
 async-scoped-local = { git = "https://github.com/rinit-org/async-scoped-local", features = [ "use-tokio" ] }
 indexmap = "2.7.1"
-flexi_logger = { version = "0.31.7", default-features = false, features = ["colors", "compress", "trc", "async"] }
 futures = "0.3.31"
 lazy_static = "1.5.0"
 lexopt = "0.3.0"
@@ -24,6 +23,8 @@ tokio-stream = "0.1.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", default-features = false }
 eyre = "0.6.12"
+tracing-appender = "0.2.4"
+flexi_logger = { version = "0.31.7", features = ["async", "compress"] }
 
 [[bin]]
 name = "rsvc"
