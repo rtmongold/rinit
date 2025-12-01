@@ -16,7 +16,7 @@ pub struct StartCommand {
 impl StartCommand {
     pub async fn run(
         self,
-        _config: Config,
+        config: Config,
     ) -> Result<()> {
         // TODO: Print duplicated service
         ensure!(
@@ -24,7 +24,7 @@ impl StartCommand {
             "duplicated service found"
         );
 
-        let mut conn = AsyncConnection::new_host_address().await?;
+        let mut conn = AsyncConnection::new_host_address(config.mode).await?;
         let mut error = false;
         for service in self.services {
             if start_service(&mut conn, &service).await? {

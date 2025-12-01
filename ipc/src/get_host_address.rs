@@ -1,4 +1,5 @@
 use nix::unistd::Uid;
+use rinit_service::Mode;
 
 lazy_static! {
     static ref UID: Uid = Uid::current();
@@ -9,6 +10,10 @@ lazy_static! {
     };
 }
 
-pub fn get_host_address() -> &'static str {
-    &HOST
+pub fn get_host_address(mode: Mode) -> &'static str {
+    if mode == Mode::Project {
+        "rsvc.socket"
+    } else {
+        &HOST
+    }
 }

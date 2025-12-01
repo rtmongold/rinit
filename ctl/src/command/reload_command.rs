@@ -12,9 +12,9 @@ pub struct ReloadCommand {}
 impl ReloadCommand {
     pub async fn run(
         self,
-        _config: Config,
+        config: Config,
     ) -> Result<()> {
-        let mut conn = AsyncConnection::new_host_address().await?;
+        let mut conn = AsyncConnection::new_host_address(config.mode).await?;
         conn.send_request(Request::ReloadGraph).await??;
 
         Ok(())

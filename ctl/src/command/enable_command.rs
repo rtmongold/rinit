@@ -82,7 +82,7 @@ impl EnableCommand {
             println!("All the services have been enabled.");
             // In this case we have enabled all services at once
             // Ask for a graph reload
-            if let Ok(mut conn) = AsyncConnection::new_host_address().await {
+            if let Ok(mut conn) = AsyncConnection::new_host_address(config.mode).await {
                 let request = Request::ReloadGraph;
                 conn.send_request(request).await??;
 
@@ -107,7 +107,7 @@ impl EnableCommand {
                 )
             }
         } else {
-            let mut conn = if let Ok(conn) = AsyncConnection::new_host_address().await {
+            let mut conn = if let Ok(conn) = AsyncConnection::new_host_address(config.mode).await {
                 Some(conn)
             } else {
                 if self.start {

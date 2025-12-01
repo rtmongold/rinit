@@ -16,7 +16,10 @@ use rinit_ipc::{
     Request,
     RequestError,
 };
-use rinit_service::config::Config;
+use rinit_service::config::{
+    self,
+    Config,
+};
 
 #[derive(Parser)]
 pub struct StatusCommand {
@@ -26,7 +29,7 @@ pub struct StatusCommand {
 impl StatusCommand {
     pub async fn run(
         self,
-        _config: Config,
+        config: Config,
     ) -> Result<()> {
         // TODO: Print duplicated service
         ensure!(
@@ -35,7 +38,7 @@ impl StatusCommand {
         );
 
         let states = if self.services.is_empty() {
-            let mut conn = AsyncConnection::new_host_address().await?;
+            let mut conn = AsyncConnection::new_host_address(config.mode).await?;
             let request = Request::ServicesStatus;
             let res: Result<Reply, RequestError> = conn.send_request(request).await?;
             match res {
@@ -51,7 +54,9 @@ impl StatusCommand {
                 }
             }
         } else {
-            let conn = Rc::new(RefCell::new(AsyncConnection::new_host_address().await?));
+            let conn = Rc::new(RefCell::new(
+                AsyncConnection::new_host_address(config.mode).await?,
+            ));
             futures::stream::iter(
                 self.services
                     .into_iter()

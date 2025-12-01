@@ -24,14 +24,16 @@ pub struct StopCommand {
 impl StopCommand {
     pub async fn run(
         self,
-        _config: Config,
+        config: Config,
     ) -> Result<()> {
         // TODO: Print duplicated service
         ensure!(
             !(1..self.services.len()).any(|i| self.services[i..].contains(&self.services[i - 1])),
             "duplicated service found"
         );
-        let conn = Rc::new(RefCell::new(AsyncConnection::new_host_address().await?));
+        let conn = Rc::new(RefCell::new(
+            AsyncConnection::new_host_address(config.mode).await?,
+        ));
         let handles: Vec<task::JoinHandle<Result<bool>>> = self
             .services
             .into_iter()

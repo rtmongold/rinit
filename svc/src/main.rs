@@ -130,6 +130,8 @@ pub async fn signal_wait() -> Signal {
 async fn main() -> Result<()> {
     let args = parse_args()?;
     let config = Config::new(args.config)?;
+    let socket_addr = rinit_ipc::get_host_address(config.mode).to_string();
+    // Setup socket listener
 
     // Setup logging
     let (file_writer, _fw_handle) = FileLogWriter::builder(
@@ -167,15 +169,14 @@ async fn main() -> Result<()> {
     let local = task::LocalSet::new();
     let live_graph = LiveServiceGraph::new(config, tx.clone())?;
 
-    // Setup socket listener
-    fs::create_dir_all(Path::new(rinit_ipc::get_host_address()).parent().unwrap())
+    fs::create_dir_all(Path::new(&socket_addr).parent().unwrap())
         .await
         .unwrap();
 
-    let listener = UnixListener::bind(rinit_ipc::get_host_address()).wrap_err_with(|| {
+    let listener = UnixListener::bind(&socket_addr).wrap_err_with(|| {
         format!(
             "rinit is already running or didn't exit properly. Delete {:?} if needed",
-            rinit_ipc::get_host_address()
+            &socket_addr
         )
     })?;
 
@@ -281,9 +282,7 @@ async fn main() -> Result<()> {
         })
         .await;
 
-    fs::remove_file(rinit_ipc::get_host_address())
-        .await
-        .unwrap();
+    fs::remove_file(socket_addr).await.unwrap();
 
     Ok(())
 }

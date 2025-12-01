@@ -69,7 +69,7 @@ impl DisableCommand {
         )
         .wrap_err_with(|| format!("unable to write the dependency graph to {:?}", graph_file))?;
 
-        if let Ok(mut conn) = AsyncConnection::new_host_address().await {
+        if let Ok(mut conn) = AsyncConnection::new_host_address(config.mode).await {
             let request = Request::ReloadGraph;
             conn.send_request(request).await??;
         } else {

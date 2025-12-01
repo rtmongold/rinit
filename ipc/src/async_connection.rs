@@ -4,6 +4,7 @@ use remoc::{
     chmux::ChMuxError,
     rch,
 };
+use rinit_service::Mode;
 use snafu::{
     OptionExt,
     ResultExt,
@@ -80,8 +81,8 @@ impl AsyncConnection {
         Ok(Self { tx, rx })
     }
 
-    pub async fn new_host_address() -> Result<Self, ConnectionError<Request>> {
-        Self::new(crate::get_host_address()).await
+    pub async fn new_host_address(mode: Mode) -> Result<Self, ConnectionError<Request>> {
+        Self::new(crate::get_host_address(mode)).await
     }
 
     pub async fn send_request(
