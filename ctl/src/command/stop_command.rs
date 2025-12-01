@@ -13,16 +13,11 @@ use rinit_ipc::{
     Reply,
     Request,
 };
-use rinit_service::{
-    config::Config,
-    types::RunLevel,
-};
+use rinit_service::config::Config;
 use tokio::task;
 
 #[derive(Parser)]
 pub struct StopCommand {
-    #[clap(long, default_value_t)]
-    runlevel: RunLevel,
     services: Vec<String>,
 }
 
@@ -46,7 +41,6 @@ impl StopCommand {
                     task::spawn_local(async move {
                         let request = Request::StopService {
                             service: service.clone(),
-                            runlevel: self.runlevel,
                         };
                         let res = conn.borrow_mut().send_request(request).await?;
 

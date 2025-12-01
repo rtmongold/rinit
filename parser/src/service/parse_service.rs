@@ -9,11 +9,11 @@ use std::{
 
 use rinit_service::types::*;
 use snafu::{
-    ensure,
     Error,
     OptionExt,
     ResultExt,
     Snafu,
+    ensure,
 };
 
 use crate::service::service_builder::*;
@@ -137,7 +137,6 @@ mod test {
                 name: "foo".to_string(),
                 options: BundleOptions {
                     contents: vec!["bar".to_string()],
-                    runlevel: RunLevel::Default
                 }
             }),
             parse_service(

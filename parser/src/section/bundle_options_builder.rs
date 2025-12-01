@@ -3,11 +3,7 @@ use std::{
     str::FromStr,
 };
 
-use rinit_service::types::{
-    BundleOptions,
-    RunLevel,
-    RunLevelParseError,
-};
+use rinit_service::types::BundleOptions;
 use snafu::{
     ResultExt,
     Snafu,
@@ -19,8 +15,6 @@ use super::SectionBuilder;
 pub enum BundleOptionsBuilderError {
     #[snafu(display("empty contents found"))]
     EmptyContents,
-    #[snafu(display("{source}"))]
-    RunLevelParseError { source: RunLevelParseError },
 }
 
 pub struct BundleOptionsBuilder {
@@ -45,13 +39,9 @@ impl SectionBuilder for BundleOptionsBuilder {
         _code_values: &mut HashMap<&'static str, String>,
     ) {
         let contents = array_values.remove("contents");
-        let runlevel = values
-            .remove("runlevel")
-            .map_or(Ok(RunLevel::default()), |s| RunLevel::from_str(&s))
-            .with_context(|_| RunLevelParseSnafu);
         self.bundle_options = Some(
             contents.map_or(Err(BundleOptionsBuilderError::EmptyContents), |contents| {
-                runlevel.map(|runlevel| BundleOptions { contents, runlevel })
+                Ok(BundleOptions { contents })
             }),
         );
     }

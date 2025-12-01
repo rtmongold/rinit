@@ -3,7 +3,6 @@ mod bundle_options;
 mod longrun;
 mod oneshot;
 mod provider;
-mod runlevel;
 mod script;
 mod script_environment;
 mod service;
@@ -16,7 +15,6 @@ pub use self::{
     longrun::*,
     oneshot::*,
     provider::*,
-    runlevel::*,
     script::*,
     script_environment::*,
     service::*,

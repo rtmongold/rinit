@@ -15,7 +15,6 @@ use rinit_parser::parse_services;
 use rinit_service::{
     config::Config,
     graph::DependencyGraph,
-    types::RunLevel,
 };
 
 use crate::util::start_service;
@@ -28,8 +27,6 @@ pub struct EnableCommand {
     pub atomic_changes: bool,
     #[clap(short, long = "start")]
     pub start: bool,
-    #[clap(long, default_value_t)]
-    runlevel: RunLevel,
     #[clap(long)]
     stop_at_errors: bool,
 }
@@ -78,23 +75,6 @@ impl EnableCommand {
         if self.atomic_changes {
             let services = parse_services(self.services.clone(), &config.dirs, system_mode)
                 .context("unable to parse services")?;
-            // The dependency graph ensure that all the dependencies have the same runlevel
-            // So we just check that we the services passed on the command line are the
-            // same runlevel requested
-            ensure!(
-                services
-                    .iter()
-                    .filter(|service| self.services.contains(&service.name().to_string()))
-                    .all(|service| service.runlevel() == self.runlevel),
-                "service {} must be of the runlevel {:?}",
-                services
-                    .iter()
-                    .filter(|service| self.services.contains(&service.name().to_string()))
-                    .find(|service| service.runlevel() != self.runlevel)
-                    .unwrap()
-                    .name(),
-                self.runlevel
-            );
             graph
                 .add_services(self.services.clone(), services)
                 .context("unable to add the parsed services to the dependency graph")?;
@@ -109,7 +89,7 @@ impl EnableCommand {
                 // If the user asked us to start the services, try to start them one by one
                 if self.start {
                     for service in &self.services {
-                        if start_service(&mut conn, service, self.runlevel).await? {
+                        if start_service(&mut conn, service).await? {
                             println!("Service {service} started successfully.");
                         } else {
                             println!("Service {service} failed to start.");
@@ -144,16 +124,6 @@ impl EnableCommand {
                     .wrap_err_with(|| {
                         format!("unable to parse service {service} and its dependencies")
                     })?;
-                ensure!(
-                    services
-                        .iter()
-                        .find(|s| service == s.name())
-                        .unwrap()
-                        .runlevel()
-                        == self.runlevel,
-                    "service {service} must be of the runlevel {:?}",
-                    self.runlevel
-                );
                 graph
                     .add_services(vec![service.to_owned()], services)
                     .wrap_err_with(|| {
@@ -184,7 +154,7 @@ impl EnableCommand {
                     conn.send_request(request).await??;
 
                     if self.start {
-                        let res = start_service(conn, &service, self.runlevel)
+                        let res = start_service(conn, &service)
                             .await
                             .wrap_err_with(|| format!("Could not start service {service}"));
                         if let Err(err) = res {

@@ -4,17 +4,12 @@ use eyre::{
     ensure,
 };
 use rinit_ipc::AsyncConnection;
-use rinit_service::{
-    config::Config,
-    types::RunLevel,
-};
+use rinit_service::config::Config;
 
 use crate::util::start_service;
 
 #[derive(Parser)]
 pub struct StartCommand {
-    #[clap(long, default_value_t)]
-    runlevel: RunLevel,
     services: Vec<String>,
 }
 
@@ -32,7 +27,7 @@ impl StartCommand {
         let mut conn = AsyncConnection::new_host_address().await?;
         let mut error = false;
         for service in self.services {
-            if start_service(&mut conn, &service, self.runlevel).await? {
+            if start_service(&mut conn, &service).await? {
                 println!("Service {service} started successfully.");
             } else {
                 println!("Service {service} failed to start.");

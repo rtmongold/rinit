@@ -14,7 +14,6 @@ use rinit_ipc::{
 use rinit_service::{
     config::Config,
     graph::DependencyGraph,
-    types::RunLevel,
 };
 
 #[derive(Parser)]
@@ -22,8 +21,6 @@ pub struct DisableCommand {
     services: Vec<String>,
     #[clap(long = "atomic-changes")]
     pub atomic_changes: bool,
-    #[clap(long, default_value_t)]
-    runlevel: RunLevel,
 }
 
 impl DisableCommand {
@@ -47,21 +44,6 @@ impl DisableCommand {
         )
         .context("unable to deserialize the dependency graph")?;
         if self.atomic_changes {
-            for service in &self.services {
-                // Check runlevel of all services to disable
-                // same as EnableCommand
-                ensure!(
-                    graph
-                        .nodes
-                        .get(service)
-                        .wrap_err_with(|| format!("the service {service} is not enabled"))?
-                        .service
-                        .runlevel()
-                        == self.runlevel,
-                    "service {service} must be of the runlevel {:?}",
-                    self.runlevel
-                )
-            }
             graph
                 .disable_services(self.services)
                 .context("unable to remove services in the dependency graph")?;
@@ -71,17 +53,6 @@ impl DisableCommand {
             self.services
                 .into_iter()
                 .try_for_each(|service| -> Result<()> {
-                    ensure!(
-                        graph
-                            .nodes
-                            .get(&service)
-                            .wrap_err_with(|| format!("the service {service} is not enabled"))?
-                            .service
-                            .runlevel()
-                            == self.runlevel,
-                        "service {service} must be of the runlevel {:?}",
-                        self.runlevel
-                    );
                     graph
                         .disable_services(vec![service.clone()])
                         .wrap_err_with(|| {

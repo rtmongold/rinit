@@ -1,9 +1,6 @@
-use rinit_service::{
-    service_state::{
-        IdleServiceState,
-        ServiceState,
-    },
-    types::RunLevel,
+use rinit_service::service_state::{
+    IdleServiceState,
+    ServiceState,
 };
 use serde::{
     Deserialize,
@@ -15,8 +12,8 @@ pub enum Request {
     UpdateServiceStatus(String, IdleServiceState),
     ServicesStatus,
     ServiceStatus(String),
-    StartService { service: String, runlevel: RunLevel },
-    StopService { service: String, runlevel: RunLevel },
+    StartService { service: String },
+    StopService { service: String },
     StartAllServices,
     StopAllServices,
     ReloadGraph,

@@ -18,7 +18,6 @@ use rinit_ipc::{
         DependentsStillRunningSnafu,
         LogicError,
         RequestError,
-        RunLevelMustMatchSnafu,
         ServiceFailedToStartSnafu,
         ServiceNotFoundSnafu,
     },
@@ -31,7 +30,6 @@ use rinit_service::{
         ServiceState,
         TransitioningServiceState,
     },
-    types::RunLevel,
 };
 use snafu::{
     ResultExt,
@@ -135,10 +133,7 @@ impl LiveServiceGraph {
         })
     }
 
-    pub async fn start_all_services(
-        &self,
-        runlevel: RunLevel,
-    ) -> Vec<Result<()>> {
+    pub async fn start_all_services(&self) -> Vec<Result<()>> {
         // This is unsafe because the futures may outlive the current scope
         // We wait on them afterwards and we know that self will outlive them
         // so it's safe to use it
@@ -146,9 +141,7 @@ impl LiveServiceGraph {
             TokioScope::scope_and_collect(|s| {
                 self.live_services.iter().for_each(|(_, live_service)| {
                     s.spawn(async move {
-                        if live_service.node.service.should_start()
-                            && live_service.node.service.runlevel() == runlevel
-                        {
+                        if live_service.node.service.should_start() {
                             // TODO: Generate an order of the services to start and use
                             // start_service_impl
                             self.start_service(live_service).await
@@ -292,10 +285,7 @@ impl LiveServiceGraph {
         Ok(())
     }
 
-    pub async fn stop_all_services(
-        &self,
-        runlevel: RunLevel,
-    ) {
+    pub async fn stop_all_services(&self) {
         // This is unsafe because the futures may outlive the current scope
         // We wait on them afterwards and we know that self will outlive them
         // so it's safe to use it
@@ -303,28 +293,24 @@ impl LiveServiceGraph {
             TokioScope::scope_and_collect(|s| {
                 for (service, live_service) in &self.live_services {
                     s.spawn(async move {
-                        if live_service.node.service.runlevel() == runlevel {
-                            let dependents = self.get_dependents(live_service);
-                            for dependent in dependents {
-                                // Wait until the dependent is down
-                                // TODO: Log
-                                while let Ok(IdleServiceState::Up) =
-                                    dependent.tx.subscribe().recv().await
-                                {
-                                }
-                            }
-                            self.stop_service(live_service).await.unwrap();
+                        let dependents = self.get_dependents(live_service);
+                        for dependent in dependents {
+                            // Wait until the dependent is down
+                            // TODO: Log
+                            while let Ok(IdleServiceState::Up) =
+                                dependent.tx.subscribe().recv().await
+                            {}
+                        }
+                        self.stop_service(live_service).await.unwrap();
 
-                            // Self::stop_service only spawn the supervisor, we don't know if the
-                            // service has stopped yet. Get the state of each one
-                            if *live_service.state.borrow()
-                                == ServiceState::Idle(IdleServiceState::Up)
+                        // Self::stop_service only spawn the supervisor, we don't know if the
+                        // service has stopped yet. Get the state of each one
+                        if *live_service.state.borrow() == ServiceState::Idle(IdleServiceState::Up)
+                        {
+                            if let Ok(IdleServiceState::Up) =
+                                live_service.tx.subscribe().recv().await
                             {
-                                if let Ok(IdleServiceState::Up) =
-                                    live_service.tx.subscribe().recv().await
-                                {
-                                    warn!("service {service} didn't exit successfully");
-                                }
+                                warn!("service {service} didn't exit successfully");
                             }
                         }
                     });
@@ -505,19 +491,6 @@ impl LiveServiceGraph {
                 *live_service = *new_live_service;
             });
         }
-        Ok(())
-    }
-
-    pub fn check_runlevel(
-        &self,
-        name: &str,
-        runlevel: RunLevel,
-    ) -> Result<()> {
-        ensure!(
-            self.get_service(name)?.node.service.runlevel() == runlevel,
-            RunLevelMustMatchSnafu { service: name }
-        );
-
         Ok(())
     }
 }

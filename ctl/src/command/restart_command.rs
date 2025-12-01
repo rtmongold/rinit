@@ -3,15 +3,10 @@ use eyre::{
     Result,
     ensure,
 };
-use rinit_service::{
-    config::Config,
-    types::RunLevel,
-};
+use rinit_service::config::Config;
 
 #[derive(Parser)]
 pub struct RestartCommand {
-    #[clap(long, default_value_t)]
-    runlevel: RunLevel,
     services: Vec<String>,
 }
 
