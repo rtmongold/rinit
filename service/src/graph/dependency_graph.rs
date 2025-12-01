@@ -1,21 +1,25 @@
-use std::collections::{
-    HashMap,
-    HashSet,
-};
+use std::collections::HashMap;
 
-use indexmap::IndexMap;
+use indexmap::{
+    IndexMap,
+    IndexSet,
+};
 use serde::{
     Deserialize,
     Serialize,
 };
 use snafu::{
-    ensure,
     OptionExt,
     Snafu,
+    ensure,
 };
 
 use crate::{
-    graph::Node,
+    Mode,
+    graph::{
+        Node,
+        Target,
+    },
     types::Service,
 };
 
@@ -29,11 +33,15 @@ pub enum DependencyGraphError {
     ServiceNotEnabled { service: String },
     #[snafu(display("service {service} is already enabled"))]
     ServiceAlreadyEnabled { service: String },
+    #[snafu(display("service {service} not found"))]
+    ServiceNotFound { service: String },
+    #[snafu(display("target {target} not available in current mode"))]
+    TargetNotAvailable { target: Target },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyGraph {
-    pub enabled_services: HashSet<usize>,
+    pub enabled_services: IndexMap<Target, IndexSet<usize>>,
     pub nodes: IndexMap<String, Node>,
 }
 
@@ -43,24 +51,48 @@ enum Color {
     Black,
 }
 
-impl DependencyGraph {
-    pub fn new() -> Self {
-        DependencyGraph {
-            enabled_services: HashSet::new(),
-            nodes: IndexMap::new(),
-        }
-    }
-}
-
-impl Default for DependencyGraph {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 type Result<T, E = DependencyGraphError> = std::result::Result<T, E>;
 
 impl DependencyGraph {
+    pub fn new(mode: Mode) -> Self {
+        match mode {
+            Mode::User => Self::new_user_graph(),
+            Mode::Root => Self::new_root_graph(),
+            Mode::Project => Self::new_project_graph(),
+        }
+    }
+    /// Create a new dependency graph, containing the defaults targets for root
+    pub fn new_root_graph() -> Self {
+        DependencyGraph {
+            enabled_services: IndexMap::from([
+                (Target::Boot, IndexSet::new()),
+                (Target::Default, IndexSet::new()),
+                (Target::Graphical, IndexSet::new()),
+            ]),
+            nodes: IndexMap::new(),
+        }
+    }
+
+    /// Create a new dependency graph, containing the defaults targets for user
+    /// services
+    pub fn new_user_graph() -> Self {
+        DependencyGraph {
+            enabled_services: IndexMap::from([
+                (Target::Default, IndexSet::new()),
+                (Target::Graphical, IndexSet::new()),
+            ]),
+            nodes: IndexMap::new(),
+        }
+    }
+
+    /// The graph in project mode doesn't contain any default services
+    pub fn new_project_graph() -> Self {
+        DependencyGraph {
+            enabled_services: IndexMap::from([(Target::Default, IndexSet::new())]),
+            nodes: IndexMap::new(),
+        }
+    }
+
     // services_to_enable nor services should have duplicates,
     // otherwise everything break
     pub fn add_services(
@@ -68,15 +100,31 @@ impl DependencyGraph {
         services_to_enable: Vec<String>,
         services: Vec<Service>,
     ) -> Result<()> {
-        services_to_enable.iter().try_for_each(|service| {
-            if let Some(index) = &self.nodes.get_index_of(service) {
-                ensure!(
-                    !self.enabled_services.contains(index),
-                    ServiceAlreadyEnabledSnafu { service }
-                );
-            }
-            Ok(())
-        })?;
+        let to_enable: Vec<(String, Option<usize>, Target)> = services_to_enable
+            .into_iter()
+            .map(|service| {
+                let target = services
+                    .iter()
+                    .find(|s| s.name() == service)
+                    // TODO check error
+                    .with_context(|| ServiceNotFoundSnafu { service: &service })?
+                    .target();
+                let index = if let Some(index) = self.nodes.get_index_of(&service) {
+                    ensure!(
+                        !self
+                            .enabled_services
+                            .get(&target)
+                            .with_context(|| TargetNotAvailableSnafu { target })?
+                            .contains(&index),
+                        ServiceAlreadyEnabledSnafu { service }
+                    );
+                    Some(index)
+                } else {
+                    None
+                };
+                Ok((service, index, target))
+            })
+            .try_collect()?;
 
         // Split the services into two different vectors
         // One that contains services that the graph doesn't have
@@ -97,9 +145,9 @@ impl DependencyGraph {
         self.check_dependencies(starting_index)?;
 
         // Update enabled services set and populate dependents
-        services_to_enable.iter().for_each(|service| {
+        to_enable.iter().for_each(|(service, _, target)| {
             let index = self.nodes.get_index_of(service).unwrap();
-            self.enabled_services.insert(index);
+            self.enabled_services[target].insert(index);
             let dependencies = self.nodes[index].service.dependencies().to_owned();
             for dep in dependencies {
                 self.nodes
@@ -110,9 +158,9 @@ impl DependencyGraph {
         });
 
         self.check_cycles(
-            services_to_enable
+            to_enable
                 .iter()
-                .map(|name| self.nodes.get_index_of(name).unwrap())
+                .map(|(name, ..)| self.nodes.get_index_of(name).unwrap())
                 .collect(),
         )?;
 
@@ -140,26 +188,24 @@ impl DependencyGraph {
         &mut self,
         services: Vec<Service>,
     ) -> bool {
-        services
-            .into_iter()
-            .any(|new_service| -> bool {
-                let (service_index, name, node) = self.nodes.get_full(new_service.name()).unwrap();
-                let existing_service = &node.service;
-                if existing_service == &new_service {
-                    return false;
-                }
+        services.into_iter().any(|new_service| -> bool {
+            let (service_index, name, node) = self.nodes.get_full(new_service.name()).unwrap();
+            let existing_service = &node.service;
+            if existing_service == &new_service {
+                return false;
+            }
 
-                let name = name.clone();
-                // Remove all instances of this service from Node::dependents
-                let dependencies = existing_service.dependencies().to_owned();
-                for dep in dependencies {
-                    self.nodes.get_mut(&dep).unwrap().remove_dependent(&name);
-                }
-                self.nodes
-                    .insert(new_service.name().to_string(), Node::new(new_service));
-                self.populate_dependents(&[service_index]);
-                true
-            })
+            let name = name.clone();
+            // Remove all instances of this service from Node::dependents
+            let dependencies = existing_service.dependencies().to_owned();
+            for dep in dependencies {
+                self.nodes.get_mut(&dep).unwrap().remove_dependent(&name);
+            }
+            self.nodes
+                .insert(new_service.name().to_string(), Node::new(new_service));
+            self.populate_dependents(&[service_index]);
+            true
+        })
     }
 
     fn populate_dependents(
@@ -253,15 +299,18 @@ impl DependencyGraph {
     ) -> Result<()> {
         services.iter().try_for_each(|service| -> Result<()> {
             // Search the service to remove in self.nodes
-            let node_index = self
+            let (node_index, _, node) = self
                 .nodes
-                .get_index_of(service)
+                .get_full(service)
                 .context(ServiceNotEnabledSnafu { service })?;
-            self.enabled_services.remove(&node_index);
+            self.enabled_services
+                .get_mut(&node.service.target())
+                .unwrap()
+                .swap_remove(&node_index);
             // If no other service is depending on this one
-            if !self.is_node_required(node_index) {
+            if !self.is_node_required(node_index, node.service.target()) {
                 // Remove it completely. Otherwise, leave it as dependency
-                self.remove_node(node_index);
+                self.remove_node(node_index, node.service.target());
             }
 
             Ok(())
@@ -271,6 +320,7 @@ impl DependencyGraph {
     fn remove_node(
         &mut self,
         index: usize,
+        target: Target,
     ) {
         let name = self.nodes[index].name().to_owned();
         // This node has already been removed from the graph
@@ -280,7 +330,7 @@ impl DependencyGraph {
         }
 
         // Recursively remove all the dependencies of this node, if no other service
-        // depends on them and they are not explicitly enabled
+        // depends on it and it is not explicitly enabled
         self.nodes[index]
             .service
             .dependencies()
@@ -289,8 +339,8 @@ impl DependencyGraph {
             .for_each(|dep| {
                 let dep_index = self.nodes.get_index_of(dep).unwrap();
                 self.nodes[dep_index].remove_dependent(&name);
-                if !self.is_node_required(dep_index) {
-                    self.remove_node(dep_index)
+                if !self.is_node_required(dep_index, target) {
+                    self.remove_node(dep_index, target)
                 }
             });
 
@@ -301,8 +351,10 @@ impl DependencyGraph {
     fn is_node_required(
         &self,
         index: usize,
+        target: Target,
     ) -> bool {
-        self.enabled_services.contains(&index) || self.nodes[index].has_dependents()
+        self.enabled_services.get(&target).unwrap().contains(&index)
+            || self.nodes[index].has_dependents()
     }
 
     #[inline]
@@ -334,7 +386,7 @@ mod test {
 
     #[test]
     fn add_services_to_empty_graph() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         graph
             .add_services(
@@ -347,7 +399,7 @@ mod test {
 
     #[test]
     fn add_service_with_dependency() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         graph
             .add_services(
@@ -367,7 +419,7 @@ mod test {
 
     #[test]
     fn add_service_with_multiple_dependencies() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         graph
             .add_services(
@@ -388,7 +440,7 @@ mod test {
 
     #[test]
     fn add_service_with_duplicated_services() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         graph
             .add_services(
@@ -415,7 +467,7 @@ mod test {
 
     #[test]
     fn add_service_with_unfulfilled_dependency() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         let res = graph.add_services(
             vec!["foo".to_string()],
@@ -437,7 +489,7 @@ mod test {
 
     #[test]
     fn add_services_with_cycle() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         let res = graph.add_services(
             vec!["foo".to_string()],
@@ -461,7 +513,7 @@ mod test {
 
     #[test]
     fn disable_service() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         graph
             .add_services(
@@ -476,7 +528,7 @@ mod test {
 
     #[test]
     fn disable_service_with_dependency() {
-        let mut graph = DependencyGraph::new();
+        let mut graph = DependencyGraph::new_project_graph();
 
         graph
             .add_services(

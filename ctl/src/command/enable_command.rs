@@ -50,7 +50,7 @@ impl EnableCommand {
             )
             .context("unable to deserialize the dependency graph")?
         } else {
-            DependencyGraph::new()
+            DependencyGraph::new(config.mode)
         };
 
         let uid = unsafe { libc::getuid() };

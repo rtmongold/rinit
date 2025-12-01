@@ -3,7 +3,13 @@ use std::{
     str::FromStr,
 };
 
-use rinit_service::types::BundleOptions;
+use rinit_service::{
+    graph::{
+        Target,
+        TargetParseError,
+    },
+    types::BundleOptions,
+};
 use snafu::{
     ResultExt,
     Snafu,
@@ -15,6 +21,8 @@ use super::SectionBuilder;
 pub enum BundleOptionsBuilderError {
     #[snafu(display("empty contents found"))]
     EmptyContents,
+    #[snafu(display("invalid target: {source}"))]
+    InvalidTarget { source: TargetParseError },
 }
 
 pub struct BundleOptionsBuilder {
@@ -39,11 +47,22 @@ impl SectionBuilder for BundleOptionsBuilder {
         _code_values: &mut HashMap<&'static str, String>,
     ) {
         let contents = array_values.remove("contents");
-        self.bundle_options = Some(
-            contents.map_or(Err(BundleOptionsBuilderError::EmptyContents), |contents| {
-                Ok(BundleOptions { contents })
-            }),
-        );
+        self.bundle_options = Some(contents.map_or(
+            Err(BundleOptionsBuilderError::EmptyContents),
+            |contents| {
+                let target_val = values.remove("target");
+                if let Some(target_val) = target_val {
+                    let target =
+                        Target::from_str(&target_val).with_context(|_| InvalidTargetSnafu)?;
+                    Ok(BundleOptions { contents, target })
+                } else {
+                    Ok(BundleOptions {
+                        contents,
+                        target: Target::Default,
+                    })
+                }
+            },
+        ));
     }
 
     fn section_name(&self) -> &'static str {
@@ -51,7 +70,7 @@ impl SectionBuilder for BundleOptionsBuilder {
     }
 
     fn get_fields(&self) -> &'static [&'static str] {
-        &[]
+        &["target"]
     }
 
     fn get_array_fields(&self) -> &'static [&'static str] {

@@ -3,7 +3,13 @@ use std::{
     str::FromStr,
 };
 
-use rinit_service::types::ServiceOptions;
+use rinit_service::{
+    graph::{
+        Target,
+        TargetParseError,
+    },
+    types::ServiceOptions,
+};
 use snafu::{
     ResultExt,
     Snafu,
@@ -15,6 +21,8 @@ use super::SectionBuilder;
 pub enum ServiceOptionsBuilderError {
     #[snafu(display("{} must be either 'yes' or 'no'", key))]
     InvalidBoolean { key: String },
+    #[snafu(display("invalid target: {source}"))]
+    InvalidTarget { source: TargetParseError },
 }
 
 pub struct ServiceOptionsBuilder {
@@ -53,14 +61,26 @@ impl SectionBuilder for ServiceOptionsBuilder {
                     key: "autostart".to_string(),
                 }
             });
-        self.options = Some(autostart.map(|autostart| {
-            ServiceOptions {
-                dependencies,
-                requires,
-                requires_one,
-                autostart,
+
+        let target = if let Some(target) = values.remove("target") {
+            Target::from_str(&target).with_context(|_| InvalidTargetSnafu)
+        } else {
+            Ok(Target::Default)
+        };
+        match (autostart, target) {
+            (Err(e), _) | (_, Err(e)) => {
+                self.options = Some(Err(e));
             }
-        }));
+            (Ok(autostart), Ok(target)) => {
+                self.options = Some(Ok(ServiceOptions {
+                    dependencies,
+                    requires,
+                    requires_one,
+                    autostart,
+                    target,
+                }));
+            }
+        }
     }
 
     fn section_name(&self) -> &'static str {
@@ -68,7 +88,7 @@ impl SectionBuilder for ServiceOptionsBuilder {
     }
 
     fn get_fields(&self) -> &'static [&'static str] {
-        &[]
+        &["target"]
     }
 
     fn get_array_fields(&self) -> &'static [&'static str] {

@@ -9,7 +9,10 @@ use std::{
 
 use async_recursion::async_recursion;
 use async_scoped_local::TokioScope;
-use indexmap::IndexMap;
+use indexmap::{
+    IndexMap,
+    IndexSet,
+};
 use rinit_ipc::{
     Request,
     request_error::{
@@ -24,7 +27,10 @@ use rinit_ipc::{
 };
 use rinit_service::{
     config::Config,
-    graph::DependencyGraph,
+    graph::{
+        DependencyGraph,
+        Target,
+    },
     service_state::{
         IdleServiceState,
         ServiceState,
@@ -48,6 +54,7 @@ use crate::live_service::LiveService;
 
 pub struct LiveServiceGraph {
     pub live_services: IndexMap<String, LiveService>,
+    pub enabled_services: IndexMap<Target, IndexSet<String>>,
     config: Config,
     send: mpsc::Sender<Request>,
 }
@@ -120,36 +127,69 @@ impl LiveServiceGraph {
             serde_json::from_slice(&std::fs::read(graph_file).with_context(|_| ReadGraphSnafu)?)
                 .with_context(|_| JsonDeserializeSnafu)?
         } else {
-            DependencyGraph::new()
+            DependencyGraph::new(config.mode)
         };
+        let enabled_services = graph
+            .enabled_services
+            .into_iter()
+            .map(|(target, enabled)| {
+                (
+                    target,
+                    enabled
+                        .into_iter()
+                        .map(|index| {
+                            graph
+                                .nodes
+                                .get_index(index)
+                                .map(|(name, _)| name.to_string())
+                                .unwrap_or("".to_string())
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
         Ok(Self {
             live_services: graph
                 .nodes
                 .into_iter()
                 .map(|(name, node)| (name, LiveService::new(node)))
                 .collect(),
+            enabled_services,
             config,
             send,
         })
     }
 
-    pub async fn start_all_services(&self) -> Vec<Result<()>> {
+    pub async fn start_target(
+        &self,
+        target: Target,
+    ) -> Vec<Result<()>> {
         // This is unsafe because the futures may outlive the current scope
         // We wait on them afterwards and we know that self will outlive them
         // so it's safe to use it
         let (_, futures) = unsafe {
             TokioScope::scope_and_collect(|s| {
-                self.live_services.iter().for_each(|(_, live_service)| {
-                    s.spawn(async move {
-                        if live_service.node.service.should_start() {
-                            // TODO: Generate an order of the services to start and use
-                            // start_service_impl
-                            self.start_service(live_service).await
-                        } else {
-                            Ok(())
-                        }
+                if let Some(enabled_services) = self.enabled_services.get(&target) {
+                    enabled_services.iter().for_each(|name| {
+                        s.spawn(async move {
+                            if let Some(live_service) = self.live_services.get(name) {
+                                if live_service.node.service.should_start() {
+                                    // TODO: Generate an order of the services to start and use
+                                    // start_service_impl
+                                    self.start_service(live_service).await
+                                } else {
+                                    Ok(())
+                                }
+                            } else {
+                                Err(LiveGraphError::LogicError {
+                                    err: LogicError::ServiceNotFound {
+                                        service: name.to_string(),
+                                    },
+                                })
+                            }
+                        });
                     });
-                });
+                }
             })
         }
         .await;
@@ -285,34 +325,51 @@ impl LiveServiceGraph {
         Ok(())
     }
 
-    pub async fn stop_all_services(&self) {
+    pub async fn stop_target(
+        &self,
+        target: Target,
+    ) {
         // This is unsafe because the futures may outlive the current scope
         // We wait on them afterwards and we know that self will outlive them
         // so it's safe to use it
         let (_res, futures) = unsafe {
             TokioScope::scope_and_collect(|s| {
-                for (service, live_service) in &self.live_services {
-                    s.spawn(async move {
-                        let dependents = self.get_dependents(live_service);
-                        for dependent in dependents {
-                            // Wait until the dependent is down
-                            // TODO: Log
-                            while let Ok(IdleServiceState::Up) =
-                                dependent.tx.subscribe().recv().await
-                            {}
-                        }
-                        self.stop_service(live_service).await.unwrap();
+                if let Some(enabled_services) = self.enabled_services.get(&target) {
+                    enabled_services.iter().for_each(|name| {
+                        s.spawn(async move {
+                            if let Some(live_service) = self.live_services.get(name) {
+                                let dependents = self.get_dependents(live_service);
+                                for dependent in dependents {
+                                    // Wait until the dependent is down
+                                    // TODO: Log
+                                    while let Ok(IdleServiceState::Up) =
+                                        dependent.tx.subscribe().recv().await
+                                    {
+                                    }
+                                }
+                                self.stop_service(live_service).await.unwrap();
 
-                        // Self::stop_service only spawn the supervisor, we don't know if the
-                        // service has stopped yet. Get the state of each one
-                        if *live_service.state.borrow() == ServiceState::Idle(IdleServiceState::Up)
-                        {
-                            if let Ok(IdleServiceState::Up) =
-                                live_service.tx.subscribe().recv().await
-                            {
-                                warn!("service {service} didn't exit successfully");
+                                // Self::stop_service only spawn the supervisor, we don't know if
+                                // the service has stopped yet. Get
+                                // the state of each one
+                                if *live_service.state.borrow()
+                                    == ServiceState::Idle(IdleServiceState::Up)
+                                {
+                                    if let Ok(IdleServiceState::Up) =
+                                        live_service.tx.subscribe().recv().await
+                                    {
+                                        warn!("service {} didn't exit successfully", live_service.node.name());
+                                    }
+                                }
+
+                                // Stop all live_service dependencies
+                                for dependency in live_service.node.service.dependencies() {
+                                    if let Err(err) = self.stop_service(&self.live_services[dependency]).await {
+                                        tracing::error!("{err}");
+                                    }
+                                }
                             }
-                        }
+                        });
                     });
                 }
             })

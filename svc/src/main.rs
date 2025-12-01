@@ -167,6 +167,7 @@ async fn main() -> Result<()> {
 
     let (tx, mut rx) = mpsc::channel::<Request>(20);
     let local = task::LocalSet::new();
+    let mode = config.mode;
     let live_graph = LiveServiceGraph::new(config, tx.clone())?;
 
     fs::create_dir_all(Path::new(&socket_addr).parent().unwrap())
@@ -182,7 +183,7 @@ async fn main() -> Result<()> {
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let mut shutdown = shutdown_tx.subscribe();
-    let handler = Rc::new(RequestHandler::new(live_graph, shutdown_tx));
+    let handler = Rc::new(RequestHandler::new(live_graph, shutdown_tx, mode));
     let handles = Rc::new(RefCell::new(Vec::new()));
     local
         .run_until(async move {

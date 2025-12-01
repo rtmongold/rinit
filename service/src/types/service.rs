@@ -4,6 +4,7 @@ use serde::{
 };
 
 use super::*;
+use crate::graph::Target;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum Service {
@@ -39,6 +40,16 @@ impl Service {
             Service::Longrun(longrun) => longrun.options.autostart,
             Service::Oneshot(oneshot) => oneshot.options.autostart,
             Service::Virtual(_) => false,
+        }
+    }
+
+    pub fn target(&self) -> Target {
+        match &self {
+            Self::Bundle(bundle) => bundle.options.target,
+            Self::Longrun(longrun) => longrun.options.target,
+            Self::Oneshot(oneshot) => oneshot.options.target,
+            // TODO: What should be done here?
+            Self::Virtual(_virtual_service) => unimplemented!(),
         }
     }
 }

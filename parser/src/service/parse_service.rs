@@ -137,6 +137,7 @@ mod test {
                 name: "foo".to_string(),
                 options: BundleOptions {
                     contents: vec!["bar".to_string()],
+                    target: rinit_service::graph::Target::Default,
                 }
             }),
             parse_service(
