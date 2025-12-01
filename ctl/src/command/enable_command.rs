@@ -1,12 +1,12 @@
 use std::fs;
 
-use anyhow::{
-    bail,
-    ensure,
+use clap::Parser;
+use eyre::{
     Context,
     Result,
+    bail,
+    ensure,
 };
-use clap::Parser;
 use rinit_ipc::{
     AsyncConnection,
     Request,
@@ -47,8 +47,9 @@ impl EnableCommand {
         let graph_file = config.dirs.graph_filename();
         let mut graph: DependencyGraph = if graph_file.exists() {
             serde_json::from_slice(
-                &fs::read(&graph_file).with_context(|| format!("unable to read graph from file {:?}", graph_file)
-                )?[..],
+                &fs::read(&graph_file)
+                    .wrap_err_with(|| format!("unable to read graph from file {:?}", graph_file))?
+                    [..],
             )
             .context("unable to deserialize the dependency graph")?
         } else {
@@ -59,14 +60,16 @@ impl EnableCommand {
         let system_mode = uid == 0;
 
         let save_graph = |graph: &DependencyGraph| -> Result<()> {
-            fs::create_dir_all(graph_file.parent().unwrap()).with_context(|| {
+            fs::create_dir_all(graph_file.parent().unwrap()).wrap_err_with(|| {
                 format!("unable to create parent directory of file {:?}", graph_file)
             })?;
             fs::write(
                 &graph_file,
                 serde_json::to_vec(&graph).context("unable to serialize the dependency graph")?,
             )
-            .with_context(|| format!("unable to write the dependency graph to {:?}", graph_file))?;
+            .wrap_err_with(|| {
+                format!("unable to write the dependency graph to {:?}", graph_file)
+            })?;
 
             Ok(())
         };
@@ -138,7 +141,7 @@ impl EnableCommand {
 
             let add_service = |service: &str, graph: &mut DependencyGraph| -> Result<()> {
                 let services = parse_services(vec![service.to_owned()], &config.dirs, system_mode)
-                    .with_context(|| {
+                    .wrap_err_with(|| {
                         format!("unable to parse service {service} and its dependencies")
                     })?;
                 ensure!(
@@ -153,7 +156,7 @@ impl EnableCommand {
                 );
                 graph
                     .add_services(vec![service.to_owned()], services)
-                    .with_context(|| {
+                    .wrap_err_with(|| {
                         format!(
                             "unable to add service {service} and its dependencies to the \
                              dependency graph"
@@ -164,7 +167,7 @@ impl EnableCommand {
             };
             for service in self.services {
                 let res = add_service(&service, &mut graph)
-                    .with_context(|| format!("Could not enable service {service}"));
+                    .wrap_err_with(|| format!("Could not enable service {service}"));
                 if let Err(err) = res {
                     if self.stop_at_errors {
                         bail!(err);
@@ -183,7 +186,7 @@ impl EnableCommand {
                     if self.start {
                         let res = start_service(conn, &service, self.runlevel)
                             .await
-                            .with_context(|| format!("Could not start service {service}"));
+                            .wrap_err_with(|| format!("Could not start service {service}"));
                         if let Err(err) = res {
                             if self.stop_at_errors {
                                 eprintln!("{err}");

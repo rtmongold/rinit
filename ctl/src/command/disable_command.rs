@@ -1,11 +1,12 @@
 use std::fs;
 
-use anyhow::{
-    ensure,
-    Context,
-    Result,
-};
 use clap::Parser;
+use eyre::{
+    Context,
+    ContextCompat,
+    Result,
+    ensure,
+};
 use rinit_ipc::{
     AsyncConnection,
     Request,
@@ -42,7 +43,7 @@ impl DisableCommand {
         );
         let mut graph: DependencyGraph = serde_json::from_slice(
             &fs::read(&graph_file)
-                .with_context(|| format!("unable to read graph from file {:?}", graph_file))?[..],
+                .wrap_err_with(|| format!("unable to read graph from file {:?}", graph_file))?[..],
         )
         .context("unable to deserialize the dependency graph")?;
         if self.atomic_changes {
@@ -53,7 +54,7 @@ impl DisableCommand {
                     graph
                         .nodes
                         .get(service)
-                        .with_context(|| format!("the service {service} is not enabled"))?
+                        .wrap_err_with(|| format!("the service {service} is not enabled"))?
                         .service
                         .runlevel()
                         == self.runlevel,
@@ -74,7 +75,7 @@ impl DisableCommand {
                         graph
                             .nodes
                             .get(&service)
-                            .with_context(|| format!("the service {service} is not enabled"))?
+                            .wrap_err_with(|| format!("the service {service} is not enabled"))?
                             .service
                             .runlevel()
                             == self.runlevel,
@@ -83,7 +84,7 @@ impl DisableCommand {
                     );
                     graph
                         .disable_services(vec![service.clone()])
-                        .with_context(|| {
+                        .wrap_err_with(|| {
                             format!("unable to disable service {service} in the dependency graph")
                         })?;
                     println!("The service {service} has been disabled.");
@@ -95,7 +96,7 @@ impl DisableCommand {
             &graph_file,
             serde_json::to_vec(&graph).context("unable to serialize the dependency graph")?,
         )
-        .with_context(|| format!("unable to write the dependency graph to {:?}", graph_file))?;
+        .wrap_err_with(|| format!("unable to write the dependency graph to {:?}", graph_file))?;
 
         if let Ok(mut conn) = AsyncConnection::new_host_address().await {
             let request = Request::ReloadGraph;

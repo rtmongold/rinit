@@ -1,5 +1,5 @@
-use anyhow::Result;
 use clap::Parser;
+use eyre::Result;
 use rinit_ipc::{
     AsyncConnection,
     Request,

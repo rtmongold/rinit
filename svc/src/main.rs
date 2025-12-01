@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 
-use anyhow::{
+use eyre::{
     Context,
     Result,
 };
@@ -172,7 +172,7 @@ async fn main() -> Result<()> {
         .await
         .unwrap();
 
-    let listener = UnixListener::bind(rinit_ipc::get_host_address()).with_context(|| {
+    let listener = UnixListener::bind(rinit_ipc::get_host_address()).wrap_err_with(|| {
         format!(
             "rinit is already running or didn't exit properly. Delete {:?} if needed",
             rinit_ipc::get_host_address()

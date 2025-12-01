@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{
+use eyre::{
     Context,
     Result,
 };

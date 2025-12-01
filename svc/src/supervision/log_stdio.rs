@@ -1,6 +1,6 @@
 use std::future;
 
-use anyhow::Result;
+use eyre::Result;
 use tokio::{
     io::AsyncReadExt,
     process::{

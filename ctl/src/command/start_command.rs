@@ -1,8 +1,8 @@
-use anyhow::{
-    ensure,
-    Result,
-};
 use clap::Parser;
+use eyre::{
+    Result,
+    ensure,
+};
 use rinit_ipc::AsyncConnection;
 use rinit_service::{
     config::Config,

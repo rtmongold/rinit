@@ -15,9 +15,9 @@ use tokio::{
 };
 
 use crate::{
-    request_error::RequestError,
     Reply,
     Request,
+    request_error::RequestError,
 };
 
 pub struct AsyncConnection {

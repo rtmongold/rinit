@@ -10,8 +10,9 @@ use std::{
     process::Stdio,
 };
 
-use anyhow::{
+use eyre::{
     Context,
+    ContextCompat,
     Result,
     bail,
 };
@@ -72,8 +73,8 @@ pub async fn exec_script(
     if let Some(user) = &script.user {
         cmd.uid(
             User::from_name(user)
-                .with_context(|| format!("unable to get UID for user {}", user))?
-                .with_context(|| format!("unable to find UID for user {}", user))?
+                .wrap_err_with(|| format!("unable to get UID for user {}", user))?
+                .wrap_err_with(|| format!("unable to find UID for user {}", user))?
                 .uid
                 .as_raw(),
         );
@@ -81,8 +82,8 @@ pub async fn exec_script(
     if let Some(group) = &script.group {
         cmd.gid(
             Group::from_name(group)
-                .with_context(|| format!("unable to get GID for group {}", group))?
-                .with_context(|| format!("unable to find GID for group {}", group))?
+                .wrap_err_with(|| format!("unable to get GID for group {}", group))?
+                .wrap_err_with(|| format!("unable to find GID for group {}", group))?
                 .gid
                 .as_raw(),
         );

@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use anyhow::{
+use eyre::{
     Context,
     Result,
 };
 use nix::{
     sys::signal::{
-        kill,
         Signal,
+        kill,
     },
     unistd::Pid,
 };
@@ -29,7 +29,7 @@ pub async fn kill_process(
         // Safe, down_signal is always parsed from Signal
         Signal::try_from(down_signal).unwrap(),
     )
-    .with_context(|| format!("unable to send signal {:?}", down_signal))?;
+    .wrap_err_with(|| format!("unable to send signal {:?}", down_signal))?;
     let timeout_res = timeout(Duration::from_millis(timeout_kill as u64), child.wait()).await;
     if let Ok(exit_status) = timeout_res {
         exit_status.context("unable to call wait")?;

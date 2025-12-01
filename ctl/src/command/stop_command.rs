@@ -3,11 +3,11 @@ use std::{
     rc::Rc,
 };
 
-use anyhow::{
+use clap::Parser;
+use eyre::{
     Result,
     ensure,
 };
-use clap::Parser;
 use rinit_ipc::{
     AsyncConnection,
     Reply,

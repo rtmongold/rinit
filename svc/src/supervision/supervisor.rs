@@ -3,10 +3,10 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{
-    bail,
+use eyre::{
     Context,
     Result,
+    bail,
 };
 use flexi_logger::writers::FileLogWriterHandle;
 use futures::future;
@@ -45,7 +45,7 @@ use crate::supervision::{
 
 struct RunningScript {
     child: Child,
-    logger: JoinHandle<Result<(), anyhow::Error>>,
+    logger: JoinHandle<Result<(), eyre::Error>>,
     logger_stop: Sender<()>,
 }
 
@@ -116,7 +116,7 @@ impl Supervisor {
 
         let (mut child, notify) = exec_script(script, &self.longrun.environment)
             .await
-            .context("unable to execute script")?;
+            .wrap_err("unable to execute script")?;
         let (tx, rx) = oneshot::channel();
         // let (fw_handle, subscriber) = self.logger_subscriber();
         let logger = task::spawn_local(
@@ -130,7 +130,7 @@ impl Supervisor {
         Ok(select! {
             timeout_res = timeout(script_timeout, child.wait()) => {
                 if let Ok(exit_status) = timeout_res {
-                    let status = exit_status.context("unable to call wait on child")?;
+                    let status = exit_status.wrap_err("unable to call wait on child")?;
                     if !tx.is_closed() {
                         tx.send(()).unwrap();
                     }
@@ -242,8 +242,8 @@ impl Supervisor {
 #[cfg(test)]
 mod test {
     use flexi_logger::{
-        writers::FileLogWriter,
         FileSpec,
+        writers::FileLogWriter,
     };
     use rinit_service::types::{
         Script,

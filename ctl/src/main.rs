@@ -3,8 +3,8 @@ mod util;
 
 use std::path::PathBuf;
 
-use anyhow::Result;
 use clap::Parser;
+use eyre::Result;
 #[derive(Parser)]
 enum Command {
     Enable(EnableCommand),

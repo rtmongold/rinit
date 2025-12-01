@@ -3,11 +3,11 @@ use std::{
     rc::Rc,
 };
 
-use anyhow::{
-    ensure,
-    Result,
-};
 use clap::Parser;
+use eyre::{
+    Result,
+    ensure,
+};
 use futures::stream::StreamExt;
 use itertools::Itertools;
 use rinit_ipc::{
