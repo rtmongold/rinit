@@ -4,11 +4,10 @@ use std::{
 };
 
 use anyhow::{
-    ensure,
     Result,
+    ensure,
 };
 use clap::Parser;
-use futures::stream::StreamExt;
 use rinit_ipc::{
     AsyncConnection,
     Reply,
@@ -71,9 +70,9 @@ impl StopCommand {
             )
             .collect();
 
-        let mut success = false;
+        let mut _success = false;
         for handle in handles {
-            success = handle.await?? | success
+            _success |= handle.await??
         }
 
         Ok(())

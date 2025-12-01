@@ -131,15 +131,15 @@ impl RequestHandler {
                 graph.check_runlevel(&service, runlevel)?;
                 graph.start_service(graph.get_service(&service)?).await?;
                 // Wait until the service is idle
-                graph.get_service(&service)?.wait_idle_state();
+                graph.get_service(&service)?.wait_idle_state().await;
                 Reply::Success()
             }
             Request::StopService { service, runlevel } => {
                 graph.check_runlevel(&service, runlevel)?;
                 graph.stop_service(graph.get_service(&service)?).await?;
                 // Wait until the service is idle
-                graph.get_service(&service)?.wait_idle_state();
-                let state = graph.get_service(&service)?.wait_idle_state();
+                graph.get_service(&service)?.wait_idle_state().await;
+                let _state = graph.get_service(&service)?.wait_idle_state();
                 Reply::Success()
             }
             Request::StartAllServices => {

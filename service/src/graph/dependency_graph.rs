@@ -146,7 +146,7 @@ impl DependencyGraph {
     ) -> bool {
         services
             .into_iter()
-            .map(|new_service| -> bool {
+            .any(|new_service| -> bool {
                 let (service_index, name, node) = self.nodes.get_full(new_service.name()).unwrap();
                 let existing_service = &node.service;
                 if existing_service == &new_service {
@@ -164,7 +164,6 @@ impl DependencyGraph {
                 self.populate_dependents(&[service_index]);
                 true
             })
-            .any(|res| res)
     }
 
     fn populate_dependents(

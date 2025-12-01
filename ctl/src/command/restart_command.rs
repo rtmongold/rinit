@@ -3,13 +3,11 @@ use anyhow::{
     Result,
 };
 use clap::Parser;
-use rinit_ipc::AsyncConnection;
 use rinit_service::{
     config::Config,
     types::RunLevel,
 };
 
-use crate::util::start_service;
 
 #[derive(Parser)]
 pub struct RestartCommand {

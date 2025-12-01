@@ -1,5 +1,3 @@
-#![feature(async_closure)]
-
 pub mod live_service;
 pub mod live_service_graph;
 pub mod request_handler;
@@ -19,12 +17,12 @@ use anyhow::{
     Result,
 };
 use flexi_logger::{
-    writers::FileLogWriter,
     Cleanup,
     Criterion,
     FileSpec,
     Naming,
     WriteMode,
+    writers::FileLogWriter,
 };
 use lexopt::prelude::{
     Long,
@@ -34,8 +32,8 @@ use live_service_graph::LiveServiceGraph;
 use nix::{
     sys::signal::Signal,
     unistd::{
-        setpgid,
         Pid,
+        setpgid,
     },
 };
 use request_handler::RequestHandler;
@@ -47,18 +45,18 @@ use tokio::{
     net::UnixListener,
     select,
     signal::unix::{
-        signal,
         SignalKind,
+        signal,
     },
     sync::{
+        Mutex,
         mpsc,
         watch,
-        Mutex,
     },
     task::{
         self,
-        spawn_local,
         JoinError,
+        spawn_local,
     },
 };
 use tracing::{
@@ -67,8 +65,8 @@ use tracing::{
     info,
 };
 use tracing_subscriber::{
-    filter::LevelFilter,
     FmtSubscriber,
+    filter::LevelFilter,
 };
 
 #[macro_use]

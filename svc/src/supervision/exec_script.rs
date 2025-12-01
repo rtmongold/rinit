@@ -3,7 +3,6 @@ use std::{
     env,
     os::fd::{
         AsRawFd,
-        IntoRawFd,
         BorrowedFd,
         OwnedFd,
         RawFd,
@@ -14,7 +13,6 @@ use std::{
 use anyhow::{
     Context,
     Result,
-    anyhow,
     bail,
 };
 use nix::{
@@ -27,7 +25,6 @@ use nix::{
         Pid,
         User,
         close,
-        dup2,
         dup2_raw,
     },
 };
@@ -116,9 +113,6 @@ pub async fn exec_script(
                 pipe = Some((read, write));
                 let notify: RawFd = (*notify).into();
                 cmd.pre_exec(move || {
-                    drop(cloned_pipe.0);
-                    dup2(cloned_pipe.1, notify)?;
-                    drop(cloned_pipe.1);
                     // Ignore the errors
                     let _ = close(cloned_pipe.0);
                     dup2_raw(BorrowedFd::borrow_raw(cloned_pipe.1), notify)?;

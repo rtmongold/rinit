@@ -96,7 +96,7 @@ pub async fn log_output(
                             warn!("{err}");
                         }
                     }
-                    Err(err) => Err(err).unwrap(),
+                    Err(err) => panic!("{:?}", err),
                 }
             },
             read = async {
@@ -117,7 +117,7 @@ pub async fn log_output(
                             warn!("{err}");
                         }
                     }
-                    Err(err) => Err(err).unwrap(),
+                    Err(err) => panic!("{:?}", err),
                 }
             }
             _ = &mut rx => {
