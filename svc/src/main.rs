@@ -41,6 +41,7 @@ use pid1::{
     FinalAction,
     finalize_as_init,
     is_pid1,
+    prepare_early_fs,
     reap_orphans,
 };
 use request_handler::RequestHandler;
@@ -148,6 +149,9 @@ async fn main() -> Result<()> {
     let args = parse_args()?;
     let pid1 = is_pid1();
     let config = Config::new(args.config)?;
+    if pid1 {
+        prepare_early_fs(&config.dirs.rundir, &config.dirs.logdir)?;
+    }
     let socket_addr = rinit_ipc::get_host_address(config.mode).to_string();
     // Setup socket listener
 
