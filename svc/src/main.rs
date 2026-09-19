@@ -1,5 +1,6 @@
 pub mod live_service;
 pub mod live_service_graph;
+pub mod pid1;
 pub mod request_handler;
 pub mod supervision;
 
@@ -35,6 +36,12 @@ use nix::{
         Pid,
         setpgid,
     },
+};
+use pid1::{
+    FinalAction,
+    finalize_as_init,
+    is_pid1,
+    reap_orphans,
 };
 use request_handler::RequestHandler;
 use rinit_ipc::Request;
@@ -115,20 +122,31 @@ lazy_static! {
         Mutex::new(signal(SignalKind::interrupt()).unwrap());
     static ref SIGTERM: Mutex<tokio::signal::unix::Signal> =
         Mutex::new(signal(SignalKind::terminate()).unwrap());
+    static ref SIGUSR1: Mutex<tokio::signal::unix::Signal> =
+        Mutex::new(signal(SignalKind::user_defined1()).unwrap());
+    static ref SIGUSR2: Mutex<tokio::signal::unix::Signal> =
+        Mutex::new(signal(SignalKind::user_defined2()).unwrap());
 }
 
-pub async fn signal_wait() -> Signal {
+///Returns (signal, final action when running as PID 1).
+/// SIGINT/SIGTERM/SIGUSR2 → poweroff, SIGUSR1 → reboot.
+pub async fn signal_wait() -> (Signal, FinalAction) {
     let mut sigint = SIGINT.lock().await;
     let mut sigterm = SIGTERM.lock().await;
+    let mut sigusr1 = SIGUSR1.lock().await;
+    let mut sigusr2 = SIGUSR2.lock().await;
     select! {
-        _ = sigint.recv() => Signal::SIGINT,
-        _ = sigterm.recv() => Signal::SIGTERM,
+        _ = sigint.recv() => (Signal::SIGINT, FinalAction::Poweroff),
+        _ = sigterm.recv() => (Signal::SIGTERM, FinalAction::Poweroff),
+        _ = sigusr1.recv() => (Signal::SIGUSR1, FinalAction::Reboot),
+        _ = sigusr2.recv() => (Signal::SIGUSR2, FinalAction::Poweroff),
     }
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = parse_args()?;
+    let pid1 = is_pid1();
     let config = Config::new(args.config)?;
     let socket_addr = rinit_ipc::get_host_address(config.mode).to_string();
     // Setup socket listener
@@ -162,8 +180,10 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber_builder.finish())
         .expect("setting default subscriber failed");
 
-    // Create its own process group
-    setpgid(Pid::from_raw(0), Pid::from_raw(0))?;
+    // Process groups are for daemons; skip when we are init.
+    if !pid1 {
+        setpgid(Pid::from_raw(0), Pid::from_raw(0))?;
+    }
 
     let (tx, mut rx) = mpsc::channel::<Request>(20);
     let local = task::LocalSet::new();
@@ -185,9 +205,18 @@ async fn main() -> Result<()> {
     let mut shutdown = shutdown_tx.subscribe();
     let handler = Rc::new(RequestHandler::new(live_graph, shutdown_tx, mode));
     let handles = Rc::new(RefCell::new(Vec::new()));
+    
+    // Shared with the signal task so we know how to finalize as PID 1.
+    let final_action = Rc::new(RefCell::new(FinalAction::Poweroff));
+    let final_action_for_exit = final_action.clone();
+
     local
         .run_until(async move {
-            info!("Starting rinit.");
+            info!("Starting rinit{}.", if pid1 { " as PID 1" } else { "" });
+
+            if pid1 {
+                spawn_local(reap_orphans());
+            }
 
             let handler_clone = handler.clone();
             let handles_clone = handles.clone();
@@ -252,6 +281,7 @@ async fn main() -> Result<()> {
                 error!("{err}");
             }
 
+            let final_action_clone = final_action.clone();
             let (res1, res2, _) = join! {
                 ipc_handler_future,
                 events_future,
@@ -264,8 +294,9 @@ async fn main() -> Result<()> {
                             None
                         }
                     };
-                    if let Some(signal) = signal  {
-                        debug!("received signal {signal}");
+                    if let Some((signal, action)) = signal  {
+                        debug!("received signal {signal} -> {action:?}");
+                        *final_action_clone.borrow_mut() = action;
                         if let Err(err) = tx.send(Request::StopAllServices).await {
                             error!("{err}");
                         }
@@ -283,7 +314,11 @@ async fn main() -> Result<()> {
         })
         .await;
 
-    fs::remove_file(socket_addr).await.unwrap();
+    let _ = fs::remove_file(socket_addr).await;
 
+    if pid1 {
+        finalize_as_init(*final_action_for_exit.borrow());
+    }
+    
     Ok(())
 }

@@ -1,7 +1,4 @@
-use rinit_service::service_state::{
-    IdleServiceState,
-    ServiceState,
-};
+use rinit_service::service_state::IdleServiceState;
 use serde::{
     Deserialize,
     Serialize,
@@ -17,11 +14,4 @@ pub enum Request {
     StartAllServices,
     StopAllServices,
     ReloadGraph,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum Reply {
-    ServicesStates(Vec<(String, ServiceState)>),
-    Result(Option<String>),
-    Empty,
 }
