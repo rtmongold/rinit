@@ -45,7 +45,7 @@ use pid1::{
     reap_orphans,
 };
 use request_handler::RequestHandler;
-use rinit_ipc::Request;
+use rinit_ipc::{Request, SystemAction};
 use rinit_service::config::Config;
 use tokio::{
     fs,
@@ -144,6 +144,14 @@ pub async fn signal_wait() -> (Signal, FinalAction) {
     }
 }
 
+fn to_final(action: SystemAction) -> FinalAction {
+    match action {
+        SystemAction::Poweroff => FinalAction::Poweroff,
+        SystemAction::Reboot => FinalAction::Reboot,
+        SystemAction::Halt => FinalAction::Halt,
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = parse_args()?;
@@ -207,12 +215,19 @@ async fn main() -> Result<()> {
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let mut shutdown = shutdown_tx.subscribe();
-    let handler = Rc::new(RequestHandler::new(live_graph, shutdown_tx, mode));
-    let handles = Rc::new(RefCell::new(Vec::new()));
+    let mut shutdown_events = shutdown_tx.subscribe();
     
-    // Shared with the signal task so we know how to finalize as PID 1.
+    // Shared with signals, events, IPC (rctl), and finalize_as_init
     let final_action = Rc::new(RefCell::new(FinalAction::Poweroff));
     let final_action_for_exit = final_action.clone();
+
+    let handler = Rc::new (RequestHandler::new(
+        live_graph,
+        shutdown_tx,
+        mode,
+        final_action.clone(),
+    ));
+    let handles = Rc::new(RefCell::new(Vec::new()));
 
     local
         .run_until(async move {
@@ -255,16 +270,24 @@ async fn main() -> Result<()> {
 
             let handler_clone = handler.clone();
             let handles_clone = handles.clone();
+            let final_action_for_events = final_action.clone();
             let events_future = spawn_local(async move {
                 let handler = handler_clone;
                 let handles = handles_clone;
                 loop {
-                    let request = match rx.recv().await {
-                        Some(req) => req,
-                        None => break,
+                    let request =  select! {
+                        req = rx.recv() => {
+                            match req {
+                                Some(r) => r,
+                                None => break,
+                            }
+                        }
+                        _ = shutdown_events.changed() => break,
                     };
                     let handler = handler.clone();
-                    if let Request::StopAllServices = request {
+                    if let Request::StopAllServices { action } = &request {
+                        *final_action_for_events.borrow_mut() = to_final(*action);
+                        // need a clone of final_action Rc inside events_future
                         if let Err(err) = handler.handle_request(request).await {
                             error!("{err}");
                         }
@@ -301,7 +324,13 @@ async fn main() -> Result<()> {
                     if let Some((signal, action)) = signal  {
                         debug!("received signal {signal} -> {action:?}");
                         *final_action_clone.borrow_mut() = action;
-                        if let Err(err) = tx.send(Request::StopAllServices).await {
+                        if let Err(err) = tx.send(Request::StopAllServices {
+                            action: match action {
+                                FinalAction::Poweroff => SystemAction::Poweroff,
+                                FinalAction::Reboot => SystemAction::Reboot,
+                                FinalAction::Halt => SystemAction::Halt,
+                            },
+                        }).await {
                             error!("{err}");
                         }
                     }

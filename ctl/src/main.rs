@@ -14,6 +14,9 @@ enum Command {
     Stop(StopCommand),
     Restart(RestartCommand),
     Reload(ReloadCommand),
+    Poweroff(PoweroffCommand),
+    Reboot(RebootCommand),
+    Halt(HaltCommand),
 }
 
 #[derive(Parser)]
@@ -31,6 +34,9 @@ use command::{
     StartCommand,
     StatusCommand,
     StopCommand,
+    PoweroffCommand,
+    RebootCommand,
+    HaltCommand,
 };
 use rinit_service::config::Config;
 
@@ -48,6 +54,9 @@ async fn main() -> Result<()> {
         Command::Stop(stop_command) => stop_command.run(config).await?,
         Command::Restart(restart_command) => restart_command.run(config).await?,
         Command::Reload(reload_command) => reload_command.run(config).await?,
+        Command::Poweroff(cmd) => cmd.run(config).await?,
+        Command::Reboot(cmd) => cmd.run(config).await?,
+        Command::Halt(cmd) => cmd.run(config).await?,
     }
 
     Ok(())

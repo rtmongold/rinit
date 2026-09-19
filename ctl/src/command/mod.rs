@@ -1,5 +1,6 @@
 mod disable_command;
 mod enable_command;
+mod power_command;
 mod reload_command;
 mod restart_command;
 mod start_command;
@@ -8,6 +9,7 @@ mod stop_command;
 
 pub use disable_command::DisableCommand;
 pub use enable_command::EnableCommand;
+pub use power_command::{HaltCommand, PoweroffCommand, RebootCommand};
 pub use reload_command::ReloadCommand;
 pub use restart_command::RestartCommand;
 pub use start_command::StartCommand;

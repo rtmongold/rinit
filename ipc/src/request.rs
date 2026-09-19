@@ -4,6 +4,13 @@ use serde::{
     Serialize,
 };
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemAction {
+    Poweroff,
+    Reboot,
+    Halt,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {
     UpdateServiceStatus(String, IdleServiceState),
@@ -12,6 +19,7 @@ pub enum Request {
     StartService { service: String },
     StopService { service: String },
     StartAllServices,
-    StopAllServices,
+    /// Stop all services, then (if PID 1) finalize with this action.
+    StopAllServices { action: SystemAction },
     ReloadGraph,
 }
