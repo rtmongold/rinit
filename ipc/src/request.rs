@@ -1,11 +1,15 @@
-use rinit_service::service_state::{
-    IdleServiceState,
-    ServiceState,
-};
+use rinit_service::service_state::IdleServiceState;
 use serde::{
     Deserialize,
     Serialize,
 };
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemAction {
+    Poweroff,
+    Reboot,
+    Halt,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {
@@ -15,13 +19,7 @@ pub enum Request {
     StartService { service: String },
     StopService { service: String },
     StartAllServices,
-    StopAllServices,
+    /// Stop all services, then (if PID 1) finalize with this action.
+    StopAllServices { action: SystemAction },
     ReloadGraph,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum Reply {
-    ServicesStates(Vec<(String, ServiceState)>),
-    Result(Option<String>),
-    Empty,
 }

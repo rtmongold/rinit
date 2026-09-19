@@ -1,5 +1,6 @@
 pub mod live_service;
 pub mod live_service_graph;
+pub mod pid1;
 pub mod request_handler;
 pub mod supervision;
 
@@ -36,8 +37,15 @@ use nix::{
         setpgid,
     },
 };
+use pid1::{
+    FinalAction,
+    finalize_as_init,
+    is_pid1,
+    prepare_early_fs,
+    reap_orphans,
+};
 use request_handler::RequestHandler;
-use rinit_ipc::Request;
+use rinit_ipc::{Request, SystemAction};
 use rinit_service::config::Config;
 use tokio::{
     fs,
@@ -115,21 +123,43 @@ lazy_static! {
         Mutex::new(signal(SignalKind::interrupt()).unwrap());
     static ref SIGTERM: Mutex<tokio::signal::unix::Signal> =
         Mutex::new(signal(SignalKind::terminate()).unwrap());
+    static ref SIGUSR1: Mutex<tokio::signal::unix::Signal> =
+        Mutex::new(signal(SignalKind::user_defined1()).unwrap());
+    static ref SIGUSR2: Mutex<tokio::signal::unix::Signal> =
+        Mutex::new(signal(SignalKind::user_defined2()).unwrap());
 }
 
-pub async fn signal_wait() -> Signal {
+///Returns (signal, final action when running as PID 1).
+/// SIGINT/SIGTERM/SIGUSR2 → poweroff, SIGUSR1 → reboot.
+pub async fn signal_wait() -> (Signal, FinalAction) {
     let mut sigint = SIGINT.lock().await;
     let mut sigterm = SIGTERM.lock().await;
+    let mut sigusr1 = SIGUSR1.lock().await;
+    let mut sigusr2 = SIGUSR2.lock().await;
     select! {
-        _ = sigint.recv() => Signal::SIGINT,
-        _ = sigterm.recv() => Signal::SIGTERM,
+        _ = sigint.recv() => (Signal::SIGINT, FinalAction::Poweroff),
+        _ = sigterm.recv() => (Signal::SIGTERM, FinalAction::Poweroff),
+        _ = sigusr1.recv() => (Signal::SIGUSR1, FinalAction::Reboot),
+        _ = sigusr2.recv() => (Signal::SIGUSR2, FinalAction::Poweroff),
+    }
+}
+
+fn to_final(action: SystemAction) -> FinalAction {
+    match action {
+        SystemAction::Poweroff => FinalAction::Poweroff,
+        SystemAction::Reboot => FinalAction::Reboot,
+        SystemAction::Halt => FinalAction::Halt,
     }
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = parse_args()?;
+    let pid1 = is_pid1();
     let config = Config::new(args.config)?;
+    if pid1 {
+        prepare_early_fs(&config.dirs.rundir, &config.dirs.logdir)?;
+    }
     let socket_addr = rinit_ipc::get_host_address(config.mode).to_string();
     // Setup socket listener
 
@@ -162,8 +192,10 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber_builder.finish())
         .expect("setting default subscriber failed");
 
-    // Create its own process group
-    setpgid(Pid::from_raw(0), Pid::from_raw(0))?;
+    // Process groups are for daemons; skip when we are init.
+    if !pid1 {
+        setpgid(Pid::from_raw(0), Pid::from_raw(0))?;
+    }
 
     let (tx, mut rx) = mpsc::channel::<Request>(20);
     let local = task::LocalSet::new();
@@ -183,11 +215,27 @@ async fn main() -> Result<()> {
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let mut shutdown = shutdown_tx.subscribe();
-    let handler = Rc::new(RequestHandler::new(live_graph, shutdown_tx, mode));
+    let mut shutdown_events = shutdown_tx.subscribe();
+    
+    // Shared with signals, events, IPC (rctl), and finalize_as_init
+    let final_action = Rc::new(RefCell::new(FinalAction::Poweroff));
+    let final_action_for_exit = final_action.clone();
+
+    let handler = Rc::new (RequestHandler::new(
+        live_graph,
+        shutdown_tx,
+        mode,
+        final_action.clone(),
+    ));
     let handles = Rc::new(RefCell::new(Vec::new()));
+
     local
         .run_until(async move {
-            info!("Starting rinit.");
+            info!("Starting rinit{}.", if pid1 { " as PID 1" } else { "" });
+
+            if pid1 {
+                spawn_local(reap_orphans());
+            }
 
             let handler_clone = handler.clone();
             let handles_clone = handles.clone();
@@ -222,16 +270,24 @@ async fn main() -> Result<()> {
 
             let handler_clone = handler.clone();
             let handles_clone = handles.clone();
+            let final_action_for_events = final_action.clone();
             let events_future = spawn_local(async move {
                 let handler = handler_clone;
                 let handles = handles_clone;
                 loop {
-                    let request = match rx.recv().await {
-                        Some(req) => req,
-                        None => break,
+                    let request =  select! {
+                        req = rx.recv() => {
+                            match req {
+                                Some(r) => r,
+                                None => break,
+                            }
+                        }
+                        _ = shutdown_events.changed() => break,
                     };
                     let handler = handler.clone();
-                    if let Request::StopAllServices = request {
+                    if let Request::StopAllServices { action } = &request {
+                        *final_action_for_events.borrow_mut() = to_final(*action);
+                        // need a clone of final_action Rc inside events_future
                         if let Err(err) = handler.handle_request(request).await {
                             error!("{err}");
                         }
@@ -252,6 +308,7 @@ async fn main() -> Result<()> {
                 error!("{err}");
             }
 
+            let final_action_clone = final_action.clone();
             let (res1, res2, _) = join! {
                 ipc_handler_future,
                 events_future,
@@ -264,9 +321,16 @@ async fn main() -> Result<()> {
                             None
                         }
                     };
-                    if let Some(signal) = signal  {
-                        debug!("received signal {signal}");
-                        if let Err(err) = tx.send(Request::StopAllServices).await {
+                    if let Some((signal, action)) = signal  {
+                        debug!("received signal {signal} -> {action:?}");
+                        *final_action_clone.borrow_mut() = action;
+                        if let Err(err) = tx.send(Request::StopAllServices {
+                            action: match action {
+                                FinalAction::Poweroff => SystemAction::Poweroff,
+                                FinalAction::Reboot => SystemAction::Reboot,
+                                FinalAction::Halt => SystemAction::Halt,
+                            },
+                        }).await {
                             error!("{err}");
                         }
                     }
@@ -283,7 +347,11 @@ async fn main() -> Result<()> {
         })
         .await;
 
-    fs::remove_file(socket_addr).await.unwrap();
+    let _ = fs::remove_file(socket_addr).await;
 
+    if pid1 {
+        finalize_as_init(*final_action_for_exit.borrow());
+    }
+    
     Ok(())
 }

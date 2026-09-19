@@ -10,7 +10,7 @@ pub use async_connection::{
 };
 pub use get_host_address::get_host_address;
 pub use reply::Reply;
-pub use request::Request;
+pub use request::{Request, SystemAction};
 pub use request_error::RequestError;
 
 #[macro_use]

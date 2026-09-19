@@ -121,7 +121,9 @@ pub async fn exec_script(
                     Ok(())
                 });
             },
-            Err(err) => bail!("Could not setup a pipe for readiness: {err}"),
+            Err(err) => {
+                bail!("Could not setup a pipe for readiness: {err}");
+            }
         }
     }
 
