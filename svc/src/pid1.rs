@@ -99,11 +99,19 @@ pub fn finalize_as_init(action: FinalAction) -> ! {
     }
 }
 
-fn console_err(msg: &str) {
-    if let Ok(mut f) = OpenOptions::new().write(true).open("/dev/console") {
-        let _ = writeln!(f, "rsvc: {msg}");
+/// Best-effort message to VGA tty0, serial, and kernel console.
+pub fn console_msg(msg: &str) {
+    let line = format!("rsvc: {msg}");
+    for path in ["/dev/tty0", "/dev/ttyS0", "/dev/console"] {
+        if let Ok(mut f) = OpenOptions::new().write(true).open(path) {
+            let _ = writeln!(f, "{line}");
+        }
     }
-    eprintln!("rsvc: {msg}");
+    eprintln!("{line}");
+}
+
+fn console_err(msg: &str) {
+    console_msg(msg);
 }
 
 fn ensure_dir(path: &Path) -> Result<()> {
@@ -130,6 +138,7 @@ fn mount_one(
 }
 
 pub fn prepare_early_fs(rundir: &Path, logdir: &Path) -> eyre::Result<()> {
+    console_msg("prepare_early_fs: begin");
     // Remount root read-write if still ro after switch_root.
     let _ = mount(
         None::<&str>,
@@ -159,5 +168,6 @@ pub fn prepare_early_fs(rundir: &Path, logdir: &Path) -> eyre::Result<()> {
 
     ensure_dir(rundir)?;
     ensure_dir(logdir)?;
+    console_msg("prepare_early_fs: done");
     Ok(())
 }
