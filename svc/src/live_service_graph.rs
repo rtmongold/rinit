@@ -227,24 +227,28 @@ impl LiveServiceGraph {
             self.start_dependencies(live_service).await?;
             self.wait_on_deps_starting(live_service).await?;
 
-            // Call the closure and let the new subscriber collect all the tracings
+            // Run the start script / supervisor, then publish idle state locally.
+            // Do not round-trip UpdateServiceStatus through the request handler: that
+            // can deadlock on the graph RwLock and panic if the broadcast has no
+            // subscribers yet.
             let success = live_service
                 .start_service(&self.config.dirs.logdir, self.send.clone())
                 .await;
-            if let Err(err) = self
-                .send
-                .send(Request::UpdateServiceStatus(
-                    live_service.node.name().to_string(),
-                    if success {
-                        IdleServiceState::Up
-                    } else {
-                        IdleServiceState::Down
-                    },
-                ))
-                .await
-            {
-                warn!("Could not update service status: {err}");
-            }
+            let idle = if success {
+                IdleServiceState::Up
+            } else {
+                IdleServiceState::Down
+            };
+            live_service.update_state(ServiceState::Idle(idle));
+            let _ = live_service.tx.send(idle);
+            ensure!(
+                idle == IdleServiceState::Up,
+                ServiceFailedToStartSnafu {
+                    service: live_service.node.name().to_string(),
+                },
+            );
+            trace!("service {} is {idle}", live_service.node.name());
+            return Ok(());
         }
         let state = live_service.wait_idle_state().await;
         ensure!(
@@ -312,16 +316,9 @@ impl LiveServiceGraph {
             TransitioningServiceState::Stopping,
         ));
         live_service.stop_service(&self.config.dirs.logdir).await;
-        if let Err(err) = self
-            .send
-            .send(Request::UpdateServiceStatus(
-                live_service.node.name().to_string(),
-                IdleServiceState::Down,
-            ))
-            .await
-        {
-            warn!("Could not update service status: {err}");
-        }
+        // Publish Down locally (same rationale as start_service — avoid handler/RwLock round-trip).
+        live_service.update_state(ServiceState::Idle(IdleServiceState::Down));
+        let _ = live_service.tx.send(IdleServiceState::Down);
         Ok(())
     }
 
@@ -525,7 +522,7 @@ impl LiveServiceGraph {
         info!("Service {name} is {state}");
         let live_service = self.get_service(name)?;
         live_service.update_state(ServiceState::Idle(state));
-        live_service.tx.send(state).unwrap();
+        let _ = live_service.tx.send(state);
         Ok(())
     }
 

@@ -39,6 +39,7 @@ use nix::{
 };
 use pid1::{
     FinalAction,
+    console_msg,
     finalize_as_init,
     is_pid1,
     prepare_early_fs,
@@ -156,9 +157,20 @@ fn to_final(action: SystemAction) -> FinalAction {
 async fn main() -> Result<()> {
     let args = parse_args()?;
     let pid1 = is_pid1();
-    let config = Config::new(args.config)?;
     if pid1 {
-        prepare_early_fs(&config.dirs.rundir, &config.dirs.logdir)?;
+        console_msg("main: entered as PID 1");
+    }
+    let config = Config::new(args.config).map_err(|err| {
+        if pid1 {
+            console_msg(&format!("Config::new failed: {err:#}"));
+        }
+        err
+    })?;
+    if pid1 {
+        prepare_early_fs(&config.dirs.rundir, &config.dirs.logdir).map_err(|err| {
+            console_msg(&format!("prepare_early_fs failed: {err:#}"));
+            err
+        })?;
     }
     let socket_addr = rinit_ipc::get_host_address(config.mode).to_string();
     // Setup socket listener
@@ -175,7 +187,7 @@ async fn main() -> Result<()> {
         Cleanup::KeepCompressedFiles(5),
     )
     .append()
-    .write_mode(WriteMode::Async)
+    .write_mode(WriteMode::Direct)
     .try_build_with_handle()
     .unwrap();
 
@@ -200,12 +212,23 @@ async fn main() -> Result<()> {
     let (tx, mut rx) = mpsc::channel::<Request>(20);
     let local = task::LocalSet::new();
     let mode = config.mode;
-    let live_graph = LiveServiceGraph::new(config, tx.clone())?;
+    if pid1 {
+        console_msg("main: loading service graph");
+    }
+    let live_graph = LiveServiceGraph::new(config, tx.clone()).map_err(|err| {
+        if pid1 {
+            console_msg(&format!("LiveServiceGraph::new failed: {err:#}"));
+        }
+        err
+    })?;
 
     fs::create_dir_all(Path::new(&socket_addr).parent().unwrap())
         .await
         .unwrap();
 
+    if pid1 {
+        console_msg(&format!("main: binding IPC socket {socket_addr}"));
+    }
     let listener = UnixListener::bind(&socket_addr).wrap_err_with(|| {
         format!(
             "rinit is already running or didn't exit properly. Delete {:?} if needed",
@@ -232,8 +255,8 @@ async fn main() -> Result<()> {
     local
         .run_until(async move {
             info!("Starting rinit{}.", if pid1 { " as PID 1" } else { "" });
-
             if pid1 {
+                console_msg("main: Starting rinit as PID 1");
                 spawn_local(reap_orphans());
             }
 
@@ -304,8 +327,14 @@ async fn main() -> Result<()> {
             // Starting rinit consists of 2 different phases
             // The first one is starting the boot services, the second one starts all the
             // other services
+            if pid1 {
+                console_msg("main: sending StartAllServices");
+            }
             if let Err(err) = tx.send(Request::StartAllServices).await {
                 error!("{err}");
+                if pid1 {
+                    console_msg(&format!("StartAllServices send failed: {err}"));
+                }
             }
 
             let final_action_clone = final_action.clone();
